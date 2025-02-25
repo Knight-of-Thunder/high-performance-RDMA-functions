@@ -1,12 +1,22 @@
-# RoCE-RDMA-Tutorial
+# high-performance RDMA functions
 
-it is extended fromRDMA-Tutorial and can work in the RoCE rdma network
+This project is intended to implement some functions 
+which can improve the performance of RDMA
 
-https://github.com/jcxue/RDMA-Tutorial
+Each of the functions is implemented in a branch,
+use checkout to go to the branch which contains the function 
+and test environment
 
-refer to https://github.com/CarpenterLee/rdma_examples
+NOW implemented functions is listed here:
+- PreSend
 
-local test enviroment:
+
+
+
+
+
+
+# local test enviroment:
 
 ubuntu 22.04 (virtual machine)
 
