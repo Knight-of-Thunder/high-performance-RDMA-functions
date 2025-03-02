@@ -8,6 +8,108 @@
 #include "setup_ib.h"
 #include "ib.h"
 #include "client.h"
+//new lib
+#include <time.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+//new function
+// 定义发送记录的数据结构
+typedef struct {
+    uint32_t req_size;
+    char *buf;
+    struct timeval last_send_time;  // 上一次发送的时间
+    int send_count;  // 发送次数
+    uint32_t avg_interval;  // 平均发送间隔（毫秒）
+    int valid;  // 记录是否有效
+} SendRecord;
+
+#define MAX_RECORDS 10  // 固定大小的记录数组
+
+// 获取当前时间
+struct timeval get_current_time() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv;
+}
+
+// 计算两个时间的差值（毫秒）
+long time_diff_ms(struct timeval start, struct timeval end) {
+    return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+}
+
+// 查找记录中是否存在相同的数据
+int find_record(SendRecord *records, int record_count, uint32_t req_size, char *buf) {
+    for (int i = 0; i < record_count; i++) {
+        if (records[i].valid && records[i].req_size == req_size) {
+            // 检查指针是否有效
+            if (records[i].buf != NULL && buf != NULL && req_size > 0) {
+                if (memcmp(records[i].buf, buf, req_size) == 0) {
+                    return i;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+// 记录发送信息
+void record_send(uint32_t req_size, char *buf, uint32_t lkey, uint64_t wr_id,
+                 uint32_t imm_data, struct ibv_qp *qp, SendRecord *records, int *record_count) {
+    int index = find_record(records, *record_count, req_size, buf);
+    if (index != -1) {
+        // 存在相同数据的记录
+        struct timeval current_time = get_current_time();
+        long diff = time_diff_ms(records[index].last_send_time, current_time);
+        records[index].send_count++;
+        if (records[index].send_count == 2) {
+            records[index].avg_interval = diff;
+        } else if (records[index].send_count > 2) {
+            records[index].avg_interval = (records[index].avg_interval * (records[index].send_count - 1) + diff) / records[index].send_count;
+        }
+        records[index].last_send_time = current_time;
+    } else {
+        // 不存在相同数据的记录，添加新记录
+        if (*record_count < MAX_RECORDS) {
+            records[*record_count].req_size = req_size;
+            records[*record_count].buf = buf;
+            records[*record_count].last_send_time = get_current_time();
+            records[*record_count].send_count = 1;
+            records[*record_count].avg_interval = 0;
+            records[*record_count].valid = 1;
+            (*record_count)++;
+        }
+    }
+    int ret = post_send(req_size, lkey, wr_id, imm_data, qp, buf);
+    if (ret != 0) {
+        // 处理发送失败的情况
+        printf("Failed to post send\n");
+    }
+}
+
+//
+static SendRecord records[MAX_RECORDS];
+static int record_count = 0;
+
+
+// 检查并执行预发送
+void check_and_send(uint32_t lkey, uint64_t wr_id, uint32_t imm_data, struct ibv_qp *qp) {
+    // static SendRecord records[MAX_RECORDS];
+    // static int record_count = 0;
+    struct timeval current_time = get_current_time();
+    // record_send(req_size, buf, lkey, wr_id, imm_data, qp, records, &record_count);
+    printf("get time succeed\n");
+    for (int i = 0; i < record_count; i++) {
+        if (records[i].valid && records[i].send_count >= 2 &&
+            time_diff_ms(current_time, records[i].last_send_time) >= records[i].avg_interval) {
+                printf("timediff succeed\n");
+            post_send(records[i].req_size,lkey,wr_id,imm_data,qp,records[i].buf);
+        }
+    }
+    return;
+}
+
+
 
 void *client_thread_func (void *arg)
 {
@@ -82,11 +184,25 @@ void *client_thread_func (void *arg)
     
     /* pre-post sends */
     buf_ptr = ib_res.ib_buf;
-    for (i = 0; i < num_concurr_msgs; i++) {
-	ret = post_send (msg_size, lkey, 0, MSG_REGULAR, qp, buf_ptr);
-	check (ret == 0, "thread[%ld]: failed to post send", thread_id);
+    // for (i = 0; i < num_concurr_msgs; i++) {
+	// ret = post_send (msg_size, lkey, 0, MSG_REGULAR, qp, buf_ptr);
+	// check (ret == 0, "thread[%ld]: failed to post send", thread_id);
+	// buf_offset = (buf_offset + msg_size) % buf_size;
+	// buf_ptr += buf_offset;
+    // }
+    
+
+    for (i = 0; i < 20; i++) {
+    // check_and_send (lkey, 0, MSG_REGULAR, qp, msg_size, buf_ptr);
+    record_send(msg_size, buf_ptr, lkey, 0, MSG_REGULAR, qp, records, &record_count);
 	buf_offset = (buf_offset + msg_size) % buf_size;
 	buf_ptr += buf_offset;
+    }
+    //check the records and pre_send
+    // 模拟循环检查
+    for (int i = 0; i < 30; i++) {
+        check_and_send(lkey, 0, MSG_REGULAR, qp);
+        sleep(1);  // 每秒检查一次
     }
     
 

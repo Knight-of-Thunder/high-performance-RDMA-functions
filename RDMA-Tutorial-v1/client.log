@@ -7,15 +7,15 @@
 is_server                 = false
 msg_size                  = 64
 num_concurr_msgs          = 1
-sock_port                 = 2333
-server_name               = 172.31.50.164
+sock_port                 = 2334
+server_name               = 192.168.88.130
 
 ************ End of Configuraion ************
 
 
 ************ IB Config ************
 
-	qp[50] <-> qp[49]
+	qp[22] <-> qp[21]
 
 ************ End of IB Config ************
 

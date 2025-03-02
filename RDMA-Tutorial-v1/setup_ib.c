@@ -191,6 +191,8 @@ int setup_ib ()
     ib_res.qp = ibv_create_qp (ib_res.pd, &qp_init_attr);
     check (ib_res.qp != NULL, "Failed to create qp");
 
+    printf("success before connect in setup_ib\n");
+
     /* connect QP */
     if (config_info.is_server) {
 	ret = connect_qp_server ();
