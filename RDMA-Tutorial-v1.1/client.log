@@ -1,0 +1,25 @@
+
+================ IB Echo Server ================
+
+
+************ Configuraion ************
+
+is_server                 = false
+msg_size                  = 64
+num_concurr_msgs          = 1
+sock_port                 = 2333
+server_name               = 172.31.50.164
+
+************ End of Configuraion ************
+
+
+************ IB Config ************
+
+	qp[50] <-> qp[49]
+
+************ End of IB Config ************
+
+
+************ Run Client ************
+
+thread[0]: ready to send
