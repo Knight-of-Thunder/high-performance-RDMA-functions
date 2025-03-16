@@ -9,8 +9,26 @@
 #include "ib.h"
 #include "client.h"
 
+#include <stdatomic.h>
+
+
+pthread_mutex_t traindata_mux;
+struct TrainData{
+    int thread;
+    long global_ops_count;
+    int msg_size;
+    int msgs;
+}traindata = {0, 0, 0, 0};
+
 void *client_thread_func (void *arg)
 {
+    //加锁更新全局 ops_count
+    pthread_mutex_lock(&traindata_mux);
+    traindata.msg_size = config_info.num_concurr_msgs;
+    traindata.msgs = config_info.msg_size;
+    pthread_mutex_unlock(&traindata_mux);
+
+
     int         ret             = 0, i = 0, n = 0;
     long	thread_id	= (long) arg;
     int         num_concurr_msgs= config_info.num_concurr_msgs;
@@ -110,7 +128,29 @@ void *client_thread_func (void *arg)
 
             if (wc[i].opcode == IBV_WC_RECV) {
 		ops_count += 1;
-		debug ("ops_count = %ld", ops_count);
+        
+        //加锁更新全局 ops_count
+        pthread_mutex_lock(&traindata_mux);
+        traindata.global_ops_count += 1;
+        pthread_mutex_unlock(&traindata_mux);
+        
+        debug ("ops_count = %ld", ops_count);
+
+
+        // if (ops_count % 1000 == 0) {  // 每 1000 次操作加锁一次，减少开销
+        //     pthread_mutex_lock(&traindata_mux);
+        //     traindata.global_ops_count += 1000; 
+        //     traindata.thread = thread_id;
+        //     debug ("ops_count = %ld", traindata.global_ops_count);
+        //     pthread_mutex_unlock(&traindata_mux);
+        // }
+
+        // atomic_fetch_add(&global_ops_countx, 1);
+        // debug ("ops_count = %ld", global_ops_countx);
+
+        // if (ops_count % 100 == 0)
+                
+ 
 
 		if (ops_count == NUM_WARMING_UP_OPS) {
 		    gettimeofday (&start, NULL);
@@ -126,8 +166,8 @@ void *client_thread_func (void *arg)
 		char *msg_ptr = (char *)wc[i].wr_id;
 		post_send (msg_size, lkey, 0, MSG_REGULAR, qp, msg_ptr);
 
-                /* post a new receive */
-                post_recv (msg_size, lkey, (uint64_t)buf_ptr, qp, buf_ptr);
+        /* post a new receive */
+        post_recv (msg_size, lkey, (uint64_t)buf_ptr, qp, buf_ptr);
 		buf_offset = (buf_offset + msg_size) % buf_size;
 		buf_ptr += buf_offset;
 	    }
@@ -150,6 +190,43 @@ void *client_thread_func (void *arg)
     }
     pthread_exit ((void *)-1);
 }
+
+
+// 数据导出线程函数
+void *export_thread_func(void *arg) {
+    long precount = 0;
+    // 打开 CSV 文件以写入数据
+    FILE *fp = fopen("exportdata.csv", "a");
+    if (fp == NULL) {
+        perror("Failed to open file");
+        return NULL; //有问题可能
+    }
+    while (1) {
+  
+        sleep(1); // 每隔 1 秒导出一次数据
+
+        // 加锁读取全局 ops_count
+        pthread_mutex_lock(&traindata_mux);
+        long current_ops_count = traindata.global_ops_count;
+        int thread = traindata.thread;
+        int msg_size = traindata.msg_size;
+        int msgs = traindata.msgs;
+        pthread_mutex_unlock(&traindata_mux);
+        long this_count = current_ops_count - precount;
+        precount = current_ops_count;
+
+        fprintf(fp, "duration:%d    thread:%d   ops:%ld throughput:%f   concurrent msgs:%d   msg size:%d", (int)1, thread, this_count, (double)this_count, msgs, msg_size);
+        // 每行数据结束后添加换行符
+        fprintf(fp, "\n");
+        fflush(fp);
+            // 关闭文件
+   
+}
+    fclose(fp);
+    return NULL;
+
+    }
+
 
 int run_client ()
 {
@@ -174,6 +251,13 @@ int run_client ()
 	ret = pthread_create (&client_threads[i], &attr, 
 			      client_thread_func, (void *)i);
 	check (ret == 0, "Failed to create client_thread[%ld]", i);
+    }
+    
+    pthread_t export_thread;
+    // 创建数据导出线程
+    if (pthread_create(&export_thread, NULL, export_thread_func, NULL) != 0) {
+        perror("Failed to create export thread");
+        return 1;
     }
 
     bool thread_ret_normally = true;
